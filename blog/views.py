@@ -9,6 +9,8 @@ from django.shortcuts import render, get_object_or_404, redirect, reverse
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.views.generic import ListView
 from taggit.models import Tag
+from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank, TrigramSimilarity
+from .forms import EmailPostForm, CommentForm, SearchForm
 
 
 # Create your views here.
@@ -21,9 +23,9 @@ class PostListView(ListView):
 
 def post_list(request, tag_slug=None):
     object_list = Post.published.all()
-    
+
     tag = None
-    
+
     if tag_slug:
         tag = get_object_or_404(Tag, slug=tag_slug)
         object_list = object_list.filter(tags__in=[tag])
@@ -41,7 +43,7 @@ def post_list(request, tag_slug=None):
         query_string = urlencode({'page': paginator.num_pages})
         return redirect(f'{base_url}?{query_string}')
 
-    
+
     return render(request,
                 'blog/post/list.html',
                 {'page': page,
@@ -51,11 +53,11 @@ def post_list(request, tag_slug=None):
 def post_detail(request, year, month, day, post):
     post = get_object_or_404(Post,
                             slug=post,
-                            status='published', 
-                            publish__year=year, 
-                            publish__month=month, 
+                            status='published',
+                            publish__year=year,
+                            publish__month=month,
                             publish__day=day)
-    
+
     #List of active commnets for this posts
     comments = post.comments.filter(active=True)
 
@@ -72,7 +74,7 @@ def post_detail(request, year, month, day, post):
             new_comment.save()
     else:
         comment_form = CommentForm()
-    
+
     # List of similar posts
     post_tags_ids = post.tags.values_list('id', flat=True)
     similar_posts = Post.published.filter(tags__in=post_tags_ids) \
@@ -109,3 +111,25 @@ def post_share(request, post_id):
     return render(request, 'blog/post/share.html', {'post': post,
                                                     'form': form,
                                                     'sent': sent})
+
+
+def post_search(request):
+    form = SearchForm()
+    query = None
+    results = []
+
+    if 'query' in request.GET:
+        form = SearchForm(request.GET)
+        if form.is_valid():
+            query = form.cleaned_data['query']
+            # search_vector = SearchVector('title', weight='A') + SearchVector('body', weight='B')
+            # search_query = SearchQuery(query)
+            results = Post.objects.annotate(
+                similarity=TrigramSimilarity('title', query),
+            ).filter(similarity__gt=0.2).order_by('-similarity')
+
+    return render(request,
+                  'blog/post/search.html',
+                  {'form': form,
+                   'query': query,
+                   'results': results})
